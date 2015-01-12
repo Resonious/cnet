@@ -8,7 +8,7 @@ struct Header {
 }
 
 fn join() {
-    let local_addr = SocketAddr { ip: Ipv4Addr(127, 0, 0, 1), port: 34568 };
+    let local_addr = SocketAddr { ip: Ipv4Addr(0, 0, 0, 0), port: 34568 };
     let mut socket = match UdpSocket::bind(local_addr) {
         Ok(s) => s,
         Err(e) => panic!("JOIN Failed to bind socket: {}", e)
@@ -40,5 +40,5 @@ fn host() {
 
 #[test]
 fn it_works() {
-    host();
+    join();
 }
