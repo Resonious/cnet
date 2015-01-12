@@ -17,6 +17,20 @@ fn join() {
     let host_addr = SocketAddr { ip: Ipv4Addr(167, 114, 96, 204), port: 34567 };
     let mut buf = [Header { op: 8 }];
     unsafe { socket.send_to(transmute(buf.as_slice()), host_addr); }
+
+    println!("Sent data, now waiting for response");
+
+    let mut in_buf = [0u8; 256];
+    match socket.recv_from(&mut in_buf) {
+        Ok((len, src_addr)) => {
+            println!("Received response of {} bytes!", len);
+            println!("First byte is {}", in_buf[0]);
+            println!("Response was from {}", src_addr);
+            println!("Host is {}", host_addr);
+        }
+
+        Err(e) => panic!("SHIT! {}", e)
+    }
 }
 
 fn host() {
@@ -28,17 +42,21 @@ fn host() {
 
     let mut buf = [0u8; 256];
     match socket.recv_from(&mut buf) {
-        Ok((len, src)) => {
+        Ok((len, src_addr)) => {
             println!("Received {} bytes!", len);
             println!("First byte is {}", buf[0]);
-            println!("And it was from {}", src);
+            println!("And it was from {}", src_addr);
+            let mut buf = [10u8];
+            println!("Now we're gonna send them a {}", buf[0]);
+            unsafe { socket.send_to(buf.as_slice(), src_addr); }
         }
 
-        Err(e) => panic!("FUCK")
+        Err(e) => panic!("FUCK {}", e)
     }
 }
 
 #[test]
 fn it_works() {
+    host();
     join();
 }
