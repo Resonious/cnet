@@ -14,13 +14,13 @@ fn join() {
         Err(e) => panic!("JOIN Failed to bind socket: {}", e)
     };
 
-    let host_addr = SocketAddr { ip: Ipv4Addr(127, 0, 0, 1), port: 34567 };
+    let host_addr = SocketAddr { ip: Ipv4Addr(167, 114, 96, 204), port: 34567 };
     let mut buf = [Header { op: 8 }];
     unsafe { socket.send_to(transmute(buf.as_slice()), host_addr); }
 }
 
 fn host() {
-    let addr = SocketAddr { ip: Ipv4Addr(127, 0, 0, 1), port: 34567 };
+    let addr = SocketAddr { ip: Ipv4Addr(167, 114, 96, 204), port: 34567 };
     let mut socket = match UdpSocket::bind(addr) {
         Ok(s) => s,
         Err(e) => panic!("HOST Failed to bind socket: {}", e)
@@ -34,12 +34,11 @@ fn host() {
             println!("And it was from {}", src);
         }
 
-        Err(e) => println!("FUCK")
+        Err(e) => panic!("FUCK")
     }
 }
 
 #[test]
 fn it_works() {
-    Thread::spawn(host);
-    join();
+    host();
 }
