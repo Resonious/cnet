@@ -2,4 +2,4 @@
 /Cargo.lock
 /testing/*.exe
 
-**/*.swp
+*.swp
