@@ -23,11 +23,14 @@ fn main() {
         Err(e) => panic!("Failed to bind socket! {}")
     };
 
-    println!("I survived!");
+    println!("I survived! (now listening??)");
 
-    /*
     let mut buf = [0u8; 256];
     match socket.recv_from(&mut buf) {
+        Ok((len, src_addr)) => {
+            println!("Fuckin' got it!!!!!!!!!!!!!!!!!!!!!!!");
+        }
+
+        Err(e) => println!("Failed to receive :(! error: {}", e)
     }
-    */
 }
