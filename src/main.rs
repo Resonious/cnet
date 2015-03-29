@@ -50,6 +50,13 @@ fn main() {
 }
 
 
+// NOTE This MUST be run before any server tests!
+#[test]
+fn start_test_server() {
+  thread::spawn(move || {
+    start_server("127.0.0.1");
+  });
+}
 #[test]
 fn server_can_receive_packet() {
   server_test!((socket, host_addr) {
