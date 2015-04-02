@@ -3,10 +3,13 @@ macro_rules! server_test(
     let (c_tx, c_rx) = mpsc::channel();
     thread::spawn(move || {
       let ip = Ipv4Addr::new(0, 0, 0, 0);
-      let addr = SocketAddr::new(IpAddr::V4(ip), 34560);
+      let addr = SocketAddr::new(IpAddr::V4(ip), 34550);
       let socket = match UdpSocket::bind(addr) {
         Ok(s) => s,
-        Err(e) => panic!("FAILED TO BIND LOCAL SOCKET WTF? {}", e)
+        Err(e) => {
+          c_tx.send(false).unwrap();
+          panic!("FAILED TO BIND LOCAL SOCKET WTF? {}", e);
+        }
       };
 
       let host_ip = Ipv4Addr::new(127, 0, 0, 1);
@@ -15,7 +18,7 @@ macro_rules! server_test(
       let test_procedure = |$socket:UdpSocket, $host_addr:SocketAddr| { $test; };
       test_procedure(socket, host_addr);
 
-      c_tx.send(()).unwrap();
+      c_tx.send(true).unwrap();
     });
 
     let mut client_done = false;
@@ -27,7 +30,7 @@ macro_rules! server_test(
       time = time + Duration::span(|| {
         if !client_done && !client_died {
           match c_rx.try_recv() {
-            Ok(()) => client_done = true,
+            Ok(good) => if good { client_done = true } else { client_died = true },
             Err(e) => match e {
               Empty => {}
               Disconnected => client_died = true
