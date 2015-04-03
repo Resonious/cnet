@@ -85,7 +85,6 @@ fn server_can_be_pinged() {
       let ms = Duration::span(|| {
         match socket.recv_from(&mut in_buf) {
           Ok((len, _src_addr)) => {
-            // I think this keeps ending up 2
             assert_eq!(len, 1);
             assert_eq!(in_buf[0], 1);
           }
