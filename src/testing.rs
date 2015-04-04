@@ -2,7 +2,7 @@ macro_rules! server_test(
   ((timeout: $timeout:expr) ($socket:ident, $host_addr:ident) $test:expr) => ({
     let (c_tx, c_rx) = mpsc::channel();
     thread::spawn(move || {
-      if env!("RUST_TEST_THREADS") != "1" {
+      if option_env!("RUST_TEST_THREADS") != Some("1") {
         thread::sleep_ms(100);
       }
 
