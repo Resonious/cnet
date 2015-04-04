@@ -2,6 +2,10 @@ macro_rules! server_test(
   ((timeout: $timeout:expr) ($socket:ident, $host_addr:ident) $test:expr) => ({
     let (c_tx, c_rx) = mpsc::channel();
     thread::spawn(move || {
+      if env!("RUST_TEST_THREADS") != "1" {
+        thread::sleep_ms(100);
+      }
+
       let ip = Ipv4Addr::new(0, 0, 0, 0);
       let addr = SocketAddr::new(IpAddr::V4(ip), 34550);
       let socket = match UdpSocket::bind(addr) {
@@ -52,8 +56,8 @@ macro_rules! server_test(
       }
     }
 
-    assert!(!client_died);
-    assert!(client_done);
+    assert!(!client_died, "The client thread was killed");
+    assert!(client_done, "The client thread did not finish");
   });
 
   (($socket:ident, $host_addr:ident) $test:expr) => (

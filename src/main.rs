@@ -71,7 +71,7 @@ fn start_server(ip: &str) {
         if len == 1 && buf[0] == 1 {
           println!("ping!!!");
           let response = [1u8];
-          socket.send_to(response.as_ref(), src_addr).unwrap();
+          socket.send_to(&response, src_addr).unwrap();
           continue;
         }
 
@@ -100,7 +100,7 @@ fn start_server(ip: &str) {
             // TODO accept a packet id so that the client can know what responses mean.
             // (maybe)
             let response = [out_op::GAME_CREATED];
-            socket.send_to(response.as_ref(), src_addr).unwrap();
+            socket.send_to(&response, src_addr).unwrap();
 
             println!("MADE GAME");
           }
@@ -133,7 +133,7 @@ fn main() {
 
 // NOTE This MUST be run before any server tests!
 #[test]
-fn start_test_server() {
+fn a0_start_test_server() {
   thread::spawn(move || {
     start_server("127.0.0.1");
   });
@@ -144,7 +144,7 @@ fn server_can_receive_packet() {
   server_test!((socket, host_addr) {
     let mut buf = [0u8; 256];
     buf[0] = 90;
-    socket.send_to(buf.as_ref(), host_addr).unwrap();
+    socket.send_to(&buf, host_addr).unwrap();
   });
 }
 
@@ -158,8 +158,10 @@ fn server_can_be_pinged() {
     let ms = Duration::span(|| {
       match socket.recv_from(&mut in_buf) {
         Ok((len, _src_addr)) => {
-          assert_eq!(len, 1);
-          assert_eq!(in_buf[0], 1);
+          assert!(len == 1,
+                  "Length of ping return packet was not 1, it was {}", len);
+          assert!(in_buf[0] == 1,
+                  "First byte of ping return packet was not 1, it was {}", in_buf[0]);
         }
 
         Err(e) => panic!("Got error {} when trying to ping!", e)
@@ -181,12 +183,14 @@ fn server_can_create_a_game() {
       ptr::copy(&name[0], &mut buf[2], name.len());
     }
 
-    socket.send_to(buf.as_ref(), host_addr).unwrap();
+    socket.send_to(&buf, host_addr).unwrap();
 
     let mut in_buf = [0u8; 256];
     match socket.recv_from(&mut in_buf) {
       Ok((len, _src_addr)) => {
-        assert_eq!(in_buf[0], out_op::GAME_CREATED);
+        assert!(len == 1, "length was fucking {}", len);
+        assert!(in_buf[0] == out_op::GAME_CREATED,
+                "Returned opcode was not GAME_CREATED, rather {}", in_buf[0]);
       }
 
       Err(e) => panic!("Got error {} when trying to create game!", e)
