@@ -6,9 +6,14 @@ macro_rules! server_test(
       let addr = SocketAddr::new(IpAddr::V4(ip), 34550);
       let socket = match UdpSocket::bind(addr) {
         Ok(s) => s,
-        Err(e) => {
-          c_tx.send(false).unwrap();
-          panic!("FAILED TO BIND LOCAL SOCKET WTF? {}", e);
+        Err(e1) => {
+          match UdpSocket::bind(SocketAddr::new(IpAddr::V4(ip), 34540)) {
+            Ok(s) => s,
+            Err(e2) => {
+              c_tx.send(false).unwrap();
+              panic!("Attempt #2 to bind to socket failed. error 1: {}, error 2: {}", e1, e2);
+            }
+          }
         }
       };
 
