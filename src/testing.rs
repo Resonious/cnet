@@ -1,3 +1,4 @@
+#[macro_export]
 macro_rules! server_test(
   ((timeout: $timeout:expr) ($socket:ident, $host_addr:ident) $test:expr) => ({
     let (c_tx, c_rx) = mpsc::channel();

@@ -6,20 +6,21 @@ use std::str::FromStr;
 use std::string::String;
 use std::convert::AsRef;
 use std::thread;
-use std::mem::{zeroed, transmute};
 use std::ptr;
-use std::sync::mpsc;
-use std::sync::mpsc::TryRecvError::{Empty, Disconnected};
-use std::time::duration::Duration;
-use std::time;
+use std::mem::{zeroed, transmute};
+
+pub mod ops;
+use ops::{in_op, out_op};
 
 #[macro_use]
-mod testing;
+#[cfg(debug_assertions)]
+pub mod testing;
+#[cfg(debug_assertions)]
+pub mod tests;
 
 #[derive(Clone, Copy)]
 struct Player {
-  // assigned, given
-  id: (i8, i8),
+  id: i16,
   last_received_packet_at: u64, // In nanoseconds
 }
 
@@ -40,13 +41,18 @@ impl<'a> Game<'a> {
   }
 }
 
-mod in_op {
-  pub const NEW_GAME: u8 = 2;
-}
-mod out_op {
-  pub const GAME_CREATED: u8 = 2;
-}
 const MAX_GAMES: usize = 20;
+
+fn error_response(socket: &UdpSocket, addr: SocketAddr, message: &str) {
+  unsafe {
+    let message_buf: &[u8] = transmute(message);
+    let mut buf = Vec::with_capacity(message_buf.len() + 1);
+    buf[0] = out_op::ERROR;
+    ptr::copy_nonoverlapping(&message_buf[0], &mut buf[1], message_buf.len());
+
+    socket.send_to(&buf, addr).unwrap();
+  }
+}
 
 fn start_server(ip: &str) {
   let ip_addr = Ipv4Addr::from_str(ip).unwrap();
@@ -129,9 +135,6 @@ fn main() {
 }
 
 
-// =========================================== TESTS ========================================
-
-// NOTE This MUST be run before any server tests!
 #[test]
 fn a0_start_test_server() {
   thread::spawn(move || {
@@ -139,61 +142,4 @@ fn a0_start_test_server() {
   });
 }
 
-#[test]
-fn server_can_receive_packet() {
-  server_test!((socket, host_addr) {
-    let mut buf = [0u8; 256];
-    buf[0] = 90;
-    socket.send_to(&buf, host_addr).unwrap();
-  });
-}
 
-#[test]
-fn server_can_be_pinged() {
-  server_test!((socket, host_addr) {
-    let mut buf = [1u8];
-    socket.send_to(buf.as_ref(), host_addr).unwrap();
-
-    let mut in_buf = [0u8; 256];
-    let ms = Duration::span(|| {
-      match socket.recv_from(&mut in_buf) {
-        Ok((len, _src_addr)) => {
-          assert!(len == 1,
-                  "Length of ping return packet was not 1, it was {}", len);
-          assert!(in_buf[0] == 1,
-                  "First byte of ping return packet was not 1, it was {}", in_buf[0]);
-        }
-
-        Err(e) => panic!("Got error {} when trying to ping!", e)
-      }
-    });
-    println!("Ping took {} ms!", ms.num_milliseconds());
-  });
-}
-
-#[test]
-fn server_can_create_a_game() {
-  server_test!((socket, host_addr) {
-    let mut buf = [0u8; 128];
-    buf[0] = in_op::NEW_GAME;
-    let name = b"Stupid game";
-
-    buf[1] = name.len() as u8;
-    unsafe {
-      ptr::copy(&name[0], &mut buf[2], name.len());
-    }
-
-    socket.send_to(&buf, host_addr).unwrap();
-
-    let mut in_buf = [0u8; 256];
-    match socket.recv_from(&mut in_buf) {
-      Ok((len, _src_addr)) => {
-        assert!(len == 1, "length was fucking {}", len);
-        assert!(in_buf[0] == out_op::GAME_CREATED,
-                "Returned opcode was not GAME_CREATED, rather {}", in_buf[0]);
-      }
-
-      Err(e) => panic!("Got error {} when trying to create game!", e)
-    }
-  });
-}
