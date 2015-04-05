@@ -45,22 +45,15 @@ impl Game {
 const MAX_GAMES: usize = 20;
 const MAX_GAME_NAME_SIZE: usize = 15;
 
-fn error_response(socket: &UdpSocket, addr: SocketAddr, message: &str) {
+fn error_response(socket: &UdpSocket, addr: SocketAddr, message: &str, buf: &mut [u8]) {
   unsafe {
     let message_buf: &[u8] = transmute(message);
     let buf_len = message_buf.len() + 1;
 
-    // TODO perhaps instead of allocating here, keep ahold of an out_buf or something
-    // and pass it here.
-
-    let mut buf = Vec::with_capacity(buf_len);
-    buf.set_len(buf_len);
-    let mut buf = buf.into_boxed_slice();
-
     buf[0] = out_op::ERROR;
     ptr::copy_nonoverlapping(&message_buf[0], &mut buf[1], message_buf.len());
 
-    socket.send_to(&buf, addr).unwrap();
+    socket.send_to(&buf[0..buf_len], addr).unwrap();
   }
 }
 
@@ -75,17 +68,20 @@ fn start_server(ip: &str) {
 
   println!("I survived! (now listening??)");
 
-  let mut buf = [0u8; 256];
+  let mut in_buf = [0u8; 1024];
+  let mut out_buf = [0u8; 1024];
+
   let mut game_names = [[0u8; MAX_GAME_NAME_SIZE]; MAX_GAMES];
   let mut games: [Option<Game>; MAX_GAMES] = [None; MAX_GAMES];
+
   'receiving: loop {
-    match socket.recv_from(&mut buf) {
+    match socket.recv_from(&mut in_buf) {
       Err(e) => println!("Failed to receive :(! error: {}", e),
 
       Ok((len, src_addr)) => {
 
         // ======================= BASIC PING =================
-        if len == 1 && buf[0] == 1 {
+        if len == 1 && in_buf[0] == 1 {
           println!("ping!!!");
           let response = [1u8];
           socket.send_to(&response, src_addr).unwrap();
@@ -93,13 +89,13 @@ fn start_server(ip: &str) {
         }
 
         // ==================== OTHER OPERATIONS ==============
-        match buf[0] {
+        match in_buf[0] {
           in_op::NEW_GAME => {
-            let name_len = buf[1] as usize;
-            let name = match str::from_utf8(&buf[2..name_len+2]) {
+            let name_len = in_buf[1] as usize;
+            let name = match str::from_utf8(&in_buf[2..name_len+2]) {
               Ok(s) => s,
-              Err(e) => {
-                error_response(&socket, src_addr, "Invalid game name");
+              Err(_) => {
+                error_response(&socket, src_addr, "Invalid game name", &mut out_buf);
                 continue 'receiving;
               }
             };
@@ -112,7 +108,7 @@ fn start_server(ip: &str) {
                   println!("CHECKING IF \"{}\" == \"{}\"", game.name, name);
                   if game.name == name {
                     let msg = format!("Game name {} already taken", name);
-                    error_response(&socket, src_addr, msg.as_str());
+                    error_response(&socket, src_addr, msg.as_str(), &mut out_buf);
                     continue 'receiving;
                   }
                 }
@@ -125,13 +121,17 @@ fn start_server(ip: &str) {
             }
 
             if index < 0 {
-              error_response(&socket, src_addr, "Server is too full to accept another game");
+              error_response(
+                  &socket, src_addr,
+                  "Server is too full to accept another game",
+                  &mut out_buf
+              );
               continue 'receiving;
             }
             let index = index as usize;
 
             unsafe {
-              ptr::copy_nonoverlapping(&buf[2], &mut game_names[index][0], name_len);
+              ptr::copy_nonoverlapping(&in_buf[2], &mut game_names[index][0], name_len);
               games[index] = Some(
                 Game::new(
                   index as u8,
@@ -149,7 +149,7 @@ fn start_server(ip: &str) {
 
           _ => {
             // TODO send back an UNKNOWN_OP op
-            println!("Unknown opcode {} in a {}-byte packet from {}", buf[0], len, src_addr);
+            println!("Unknown opcode {} in a {}-byte packet from {}", in_buf[0], len, src_addr);
           }
         }
       }
