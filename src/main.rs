@@ -8,10 +8,11 @@ use std::string::String;
 use std::convert::AsRef;
 use std::thread;
 use std::ptr;
-use std::mem::{zeroed, transmute};
+use std::mem::{zeroed, transmute, size_of};
 
+#[macro_use]
 pub mod ops;
-use ops::{in_op, out_op};
+use ops::{in_op, out_op, Packet};
 
 #[macro_use]
 #[cfg(debug_assertions)]
@@ -89,17 +90,19 @@ fn start_server(ip: &str) {
         }
 
         // ==================== OTHER OPERATIONS ==============
-        match in_buf[0] {
+        let mut packet = Packet { buf: &mut in_buf, pos: 0 };
+
+        match pull!(packet => u8) {
           in_op::NEW_GAME => {
-            let name_len = in_buf[1] as usize;
-            let name = match str::from_utf8(&in_buf[2..name_len+2]) {
+            let name_len = pull!(packet => u8) as usize;
+            let name_pos = packet.pos;
+            let name = match str::from_utf8(pull!(packet, name_len)) {
               Ok(s) => s,
               Err(_) => {
                 error_response(&socket, src_addr, "Invalid game name", &mut out_buf);
                 continue 'receiving;
               }
             };
-            println!("Making a game with a name of {}", name);
 
             let mut index: isize = -1;
             for i in 0..MAX_GAMES {
@@ -131,7 +134,7 @@ fn start_server(ip: &str) {
             let index = index as usize;
 
             unsafe {
-              ptr::copy_nonoverlapping(&in_buf[2], &mut game_names[index][0], name_len);
+              ptr::copy_nonoverlapping(&packet.buf[name_pos], &mut game_names[index][0], name_len);
               games[index] = Some(
                 Game::new(
                   index as u8,
@@ -149,7 +152,7 @@ fn start_server(ip: &str) {
 
           _ => {
             // TODO send back an UNKNOWN_OP op
-            println!("Unknown opcode {} in a {}-byte packet from {}", in_buf[0], len, src_addr);
+            println!("Unknown opcode {} in a {}-byte packet from {}", packet.buf[0], len, src_addr);
           }
         }
       }
