@@ -96,10 +96,13 @@ fn start_server(ip: &str) {
         let mut packet = Packet { buf: &mut in_buf, pos: 0 };
         let mut response = Packet { buf: &mut out_buf, pos: 0 };
 
-        let packet_id = pull!(packet => u16);
-        match pull!(packet => u8) {
+        // let packet_id = pull!(packet => u16);
+        let packet_id: u16 = packet.pull();
+        let opcode = packet.pull::<u8>();
+        match opcode {
           in_op::NEW_GAME => {
-            let name_len = pull!(packet => u8) as usize;
+            // let name_len = pull!(packet => u8) as usize;
+            let name_len = packet.pull::<u8>() as usize;
 
             if name_len > MAX_GAME_NAME_SIZE {
               let msg = format!("Game name too long! Must be < {} characters.", MAX_GAME_NAME_SIZE);
@@ -108,11 +111,13 @@ fn start_server(ip: &str) {
             }
 
             let name_pos = packet.pos;
-            let name = match str::from_utf8(pull!(packet, name_len)) {
-              Ok(s) => s,
-              Err(_) => {
-                error_response(&socket, src_addr, "Invalid game name", packet_id, &mut response);
-                continue 'receiving;
+            let name = unsafe {
+              match str::from_utf8(packet.peek_slice(name_len)) {
+                Ok(s) => s,
+                Err(_) => {
+                  error_response(&socket, src_addr, "Invalid game name", packet_id, &mut response);
+                  continue 'receiving;
+                }
               }
             };
 
@@ -157,7 +162,6 @@ fn start_server(ip: &str) {
             response.push(&packet_id);
             response.push(&out_op::GAME_CREATED);
             response.send_to(&socket, src_addr);
-            // socket.send_to(&response.buf, src_addr).unwrap();
 
             println!("MADE GAME");
           }
