@@ -44,12 +44,16 @@ macro_rules! create_game(
   ($socket:expr, $host_addr:expr, $name:expr
       => ($packet:ident, $len:ident, $src_addr:ident) $logic:block) => ({
     let mut buf = [0u8; 128];
-    buf[0] = in_op::NEW_GAME;
+    // u16 packet id
+    buf[0] = 0;
+    buf[1] = 0;
+    // u8 opcode
+    buf[2] = in_op::NEW_GAME;
     let name = $name;
 
-    buf[1] = name.len() as u8;
+    buf[3] = name.len() as u8;
     unsafe {
-      ptr::copy_nonoverlapping(&name[0], &mut buf[2], name.len());
+      ptr::copy_nonoverlapping(&name[0], &mut buf[4], name.len());
     }
 
     $socket.send_to(&buf, $host_addr).unwrap();
@@ -70,13 +74,17 @@ macro_rules! create_game(
 fn server_cannot_create_2_games_with_the_same_name() {
   server_test!((socket, host_addr) {
     create_game!(socket, host_addr, b"Stupid game" => (packet, len, _src_addr) {
-      assert!(packet[0] == out_op::GAME_CREATED,
+      assert_eq!(packet[0], 0);
+      assert_eq!(packet[1], 0);
+      assert!(packet[2] == out_op::GAME_CREATED,
               "Returned opcode was not GAME_CREATED, rather {}", packet[0]);
     });
 
     create_game!(socket, host_addr, b"Stupid game" => (packet, len, _src_addr) {
-      assert!(packet[0] == out_op::ERROR,
-              "Returned opcode was not ERROR, rather {}", packet[0]);
+      assert_eq!(packet[0], 0);
+      assert_eq!(packet[1], 0);
+      assert!(packet[2] == out_op::ERROR,
+              "Returned opcode was not ERROR, rather {}", packet[2]);
     });
   });
 }

@@ -46,15 +46,18 @@ impl Game {
 const MAX_GAMES: usize = 20;
 const MAX_GAME_NAME_SIZE: usize = 15;
 
-fn error_response(socket: &UdpSocket, addr: SocketAddr, message: &str, buf: &mut [u8]) {
+fn error_response(socket: &UdpSocket, addr: SocketAddr, message: &str, packet_id: u16, buf: &mut Packet) {
   unsafe {
     let message_buf: &[u8] = transmute(message);
-    let buf_len = message_buf.len() + 1;
+    let message_len = message_buf.len();
 
-    buf[0] = out_op::ERROR;
-    ptr::copy_nonoverlapping(&message_buf[0], &mut buf[1], message_buf.len());
+    buf.push(&packet_id);
+    buf.push(&out_op::ERROR);
+    buf.push(&message_len);
+    // TODO push message buf
 
-    socket.send_to(&buf[0..buf_len], addr).unwrap();
+    buf.send_to(socket, addr);
+    // socket.send_to(&buf[0..buf_len], addr).unwrap();
   }
 }
 
@@ -91,15 +94,24 @@ fn start_server(ip: &str) {
 
         // ==================== OTHER OPERATIONS ==============
         let mut packet = Packet { buf: &mut in_buf, pos: 0 };
+        let mut response = Packet { buf: &mut out_buf, pos: 0 };
 
+        let packet_id = pull!(packet => u16);
         match pull!(packet => u8) {
           in_op::NEW_GAME => {
             let name_len = pull!(packet => u8) as usize;
+
+            if name_len > MAX_GAME_NAME_SIZE {
+              let msg = format!("Game name too long! Must be < {} characters.", MAX_GAME_NAME_SIZE);
+              error_response(&socket, src_addr, msg.as_str(), packet_id, &mut response);
+              continue 'receiving;
+            }
+
             let name_pos = packet.pos;
             let name = match str::from_utf8(pull!(packet, name_len)) {
               Ok(s) => s,
               Err(_) => {
-                error_response(&socket, src_addr, "Invalid game name", &mut out_buf);
+                error_response(&socket, src_addr, "Invalid game name", packet_id, &mut response);
                 continue 'receiving;
               }
             };
@@ -111,7 +123,7 @@ fn start_server(ip: &str) {
                   println!("CHECKING IF \"{}\" == \"{}\"", game.name, name);
                   if game.name == name {
                     let msg = format!("Game name {} already taken", name);
-                    error_response(&socket, src_addr, msg.as_str(), &mut out_buf);
+                    error_response(&socket, src_addr, msg.as_str(), packet_id, &mut response);
                     continue 'receiving;
                   }
                 }
@@ -127,7 +139,7 @@ fn start_server(ip: &str) {
               error_response(
                   &socket, src_addr,
                   "Server is too full to accept another game",
-                  &mut out_buf
+                  packet_id, &mut response
               );
               continue 'receiving;
             }
@@ -142,10 +154,10 @@ fn start_server(ip: &str) {
               );
             }
 
-            // TODO accept a packet id so that the client can know what responses mean.
-            // (maybe)
-            let response = [out_op::GAME_CREATED];
-            socket.send_to(&response, src_addr).unwrap();
+            response.push(&packet_id);
+            response.push(&out_op::GAME_CREATED);
+            response.send_to(&socket, src_addr);
+            // socket.send_to(&response.buf, src_addr).unwrap();
 
             println!("MADE GAME");
           }

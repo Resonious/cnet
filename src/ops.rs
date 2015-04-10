@@ -1,3 +1,8 @@
+use std::ptr;
+use std::mem::{size_of, transmute};
+use std::net::UdpSocket;
+use std::net::{SocketAddr};
+
 pub mod in_op {
   pub const NEW_GAME: u8 = 2;
 }
@@ -15,8 +20,20 @@ impl<'b> Packet<'b> {
   pub fn ptr(&self) -> &u8 {
     &self.buf[self.pos]
   }
+
+  pub fn push<T>(&mut self, data: &T) {
+    unsafe {
+      ptr::copy_nonoverlapping::<T>(data, transmute(&mut self.buf[self.pos]), 1);
+    }
+    self.pos += size_of::<T>();
+  }
+
+  pub fn send_to(&self, socket: &UdpSocket, addr: SocketAddr) {
+    socket.send_to(&self.buf[0..self.pos], addr).unwrap();
+  }
 }
 
+// TODO turn this into a method
 #[macro_export]
 macro_rules! pull(
   ($packet:expr, $bytes:expr) => ({
@@ -32,3 +49,5 @@ macro_rules! pull(
     unsafe { *(transmute::<_, &$t>(&$packet.buf[pos..pos + size][0])) }
   });
 );
+
+// TODO make push! or a method I dunno.
