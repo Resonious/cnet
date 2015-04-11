@@ -2,11 +2,12 @@ use std::net::UdpSocket;
 use std::net::{SocketAddr, IpAddr, Ipv4Addr};
 use std::thread;
 use std::ptr;
+use std::mem::transmute;
 use std::sync::mpsc;
 use std::sync::mpsc::TryRecvError::{Empty, Disconnected};
 use std::time::duration::Duration;
 
-use ops::{in_op, out_op};
+use ops::{in_op, out_op, Packet};
 
 #[test]
 fn server_can_receive_packet() {
@@ -41,12 +42,14 @@ fn server_can_be_pinged() {
 }
 
 macro_rules! create_game(
-  ($socket:expr, $host_addr:expr, $name:expr
+  ($socket:expr, $host_addr:expr, $name:expr, $packet_id:expr
       => ($packet:ident, $len:ident, $src_addr:ident) $logic:block) => ({
     let mut buf = [0u8; 128];
     // u16 packet id
-    buf[0] = 0;
-    buf[1] = 0;
+    unsafe {
+      let packet_id = $packet_id;
+      ptr::copy_nonoverlapping(&packet_id, &mut buf[0], 2);
+    }
     // u8 opcode
     buf[2] = in_op::NEW_GAME;
     let name = $name;
@@ -67,7 +70,12 @@ macro_rules! create_game(
 
       Err(e) => panic!("Got error {} when trying to create game!", e)
     }
-  })
+  });
+
+  ($socket:expr, $host_addr:expr, $name:expr
+      => ($packet:ident, $len:ident, $src_addr:ident) $logic:block) => ({
+    create_game!($socket, $host_addr, $name, 0 => ($packet, $len, $src_addr) $logic);
+  });
 );
 
 #[test]
@@ -85,6 +93,20 @@ fn server_cannot_create_2_games_with_the_same_name() {
       assert_eq!(packet[1], 0);
       assert!(packet[2] == out_op::ERROR,
               "Returned opcode was not ERROR, rather {}", packet[2]);
+    });
+  });
+}
+
+#[test]
+fn server_gets_a_player_id_or_something_on_game_create() {
+  server_test!((socket, host_addr) {
+    create_game!(socket, host_addr, b"THE GAME", 12 => (buf, len, _src_addr) {
+      let mut packet = unsafe { Packet { buf: transmute(buf), pos: 0 } };
+      let packet_id: u16 = packet.pull();
+      assert_eq!(packet_id, 12);
+      assert_eq!(packet.pull::<u8>(), out_op::GAME_CREATED);
+
+      // TODO look for player id
     });
   });
 }

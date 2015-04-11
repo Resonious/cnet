@@ -89,7 +89,7 @@ fn start_server(ip: &str) {
           println!("ping!!!");
           let response = [1u8];
           socket.send_to(&response, src_addr).unwrap();
-          continue;
+          continue 'receiving;
         }
 
         // ==================== OTHER OPERATIONS ==============
@@ -97,8 +97,16 @@ fn start_server(ip: &str) {
         let mut response = Packet { buf: &mut out_buf, pos: 0 };
 
         // let packet_id = pull!(packet => u16);
+
+        if response.buf.len() < 3 {
+          println!("Packet too short to be anything!");
+          continue 'receiving;
+        }
+
         let packet_id: u16 = packet.pull();
         let opcode = packet.pull::<u8>();
+
+        println!("********* processing packet id {} opcode {}", packet_id, opcode);
         match opcode {
           in_op::NEW_GAME => {
             // let name_len = pull!(packet => u8) as usize;
@@ -161,6 +169,7 @@ fn start_server(ip: &str) {
 
             response.push(&packet_id);
             response.push(&out_op::GAME_CREATED);
+            // TODO send a player ID and whatever player info they need
             response.send_to(&socket, src_addr);
 
             println!("MADE GAME");
@@ -168,7 +177,8 @@ fn start_server(ip: &str) {
 
           _ => {
             // TODO send back an UNKNOWN_OP op
-            println!("Unknown opcode {} in a {}-byte packet from {}", packet.buf[0], len, src_addr);
+            println!("Unknown opcode {} in a {}-byte packet from {} with packet id {}",
+                     opcode, len, src_addr, packet_id);
           }
         }
       }
