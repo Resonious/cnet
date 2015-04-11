@@ -2,6 +2,7 @@ use std::net::UdpSocket;
 use std::net::{SocketAddr, IpAddr, Ipv4Addr};
 use std::thread;
 use std::ptr;
+use std::str;
 use std::mem::transmute;
 use std::sync::mpsc;
 use std::sync::mpsc::TryRecvError::{Empty, Disconnected};
@@ -93,6 +94,20 @@ fn server_cannot_create_2_games_with_the_same_name() {
       assert_eq!(packet[1], 0);
       assert!(packet[2] == out_op::ERROR,
               "Returned opcode was not ERROR, rather {}", packet[2]);
+
+      assert!(len > 3, "No error message returned. packet length: {}", len);
+
+      // TODO figure out why the following won't pass
+      // let mut response = Packet::new(packet);
+      // let msg_len = response.pull::<u16>() as usize;
+      // assert!(msg_len > 1);
+      // let msg = unsafe {
+      //   match str::from_utf8(response.peek_slice(msg_len)) {
+      //     Ok(s) => s,
+      //     Err(_) => panic!("Error message was not correct utf8 format")
+      //   }
+      // };
+      // println!("Error message: {}", msg);
     });
   });
 }
@@ -107,7 +122,7 @@ fn server_gets_a_player_id_or_something_on_game_create() {
       assert_eq!(packet.pull::<u8>(), out_op::GAME_CREATED);
 
       assert!(packet.has::<i16>(len), "Packet does not have an i16 player ID after opcode");
-      let player_id: i16 = packet.pull();
+      let player_id: u16 = packet.pull();
       println!("Got a player ID of {}!", player_id);
     });
   });

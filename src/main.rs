@@ -25,14 +25,15 @@ pub mod tests;
 
 #[derive(Clone, Copy)]
 struct Player {
-  id: i16,
+  id: u16,
   last_received_packet_at: u64, // In nanoseconds
 }
 
 impl Player {
-  fn new(id: i16) -> Player {
+  fn new(game_id: u8, id: u8) -> Player {
+    let id_parts = [game_id, id];
     Player {
-      id: id,
+      id: unsafe { *transmute::<_, &u16>(&id_parts[0]) },
       last_received_packet_at: precise_time_ns()
     }
   }
@@ -42,17 +43,17 @@ impl Player {
 struct Game {
   id: u8,
   name: &'static str,
-  players: [Player; 10]
+  players: [Option<Player>; 10]
 }
 
 impl Game {
-  fn new(id: u8, name: &'static str, first_player_id: i16) -> Game {
+  fn new(id: u8, name: &'static str) -> Game {
     let mut game = Game {
       id: id,
       name: name,
-      players: unsafe { zeroed() }
+      players: [None; 10]
     };
-    game.players[0] = Player::new(first_player_id);
+    game.players[0] = Some(Player::new(id, 0));
     game
   }
 }
@@ -60,19 +61,119 @@ impl Game {
 const MAX_GAMES: usize = 20;
 const MAX_GAME_NAME_SIZE: usize = 15;
 
-fn error_response(socket: &UdpSocket, addr: SocketAddr, message: &str, packet_id: u16, buf: &mut Packet) {
+struct Server<'a> {
+  socket:     &'a UdpSocket,
+
+  game_names: &'a mut [[u8; MAX_GAME_NAME_SIZE]; MAX_GAMES],
+  games:      &'a mut [Option<Game>; MAX_GAMES],
+}
+
+struct PacketInfo<'a, 'b> {
+  src_addr:  SocketAddr,
+  packet_id: u16,
+  opcode:    u8,
+  len:       usize,
+  request:   &'a mut Packet<'a>,
+  response:  &'b mut Packet<'b>
+}
+
+impl<'a, 'b> PacketInfo<'a, 'b> {
+  pub fn packets(&mut self) -> (&'static mut Packet<'static>, &'static mut Packet<'static>) {
+    // HACK holy hell
+    unsafe {
+      let mut request = transmute::<_, *mut usize>(&self.request);
+      let mut response = transmute::<_, *mut usize>(&self.response);
+      (transmute(*request), transmute(*response))
+    }
+  }
+}
+
+fn error_response(server: &Server, packet: &mut PacketInfo, message: &str) {
   unsafe {
     let message_buf: &[u8] = transmute(message);
-    let message_len = message_buf.len();
+    let message_len = message_buf.len() as u16;
 
-    buf.push(&packet_id);
+    let ref mut buf = packet.response;
+    buf.push(&packet.packet_id);
     buf.push(&out_op::ERROR);
     buf.push(&message_len);
-    // TODO push message buf
+    buf.push_slice(message_buf);
 
-    buf.send_to(socket, addr);
+    buf.send_to(server.socket, packet.src_addr);
     // socket.send_to(&buf[0..buf_len], addr).unwrap();
   }
+}
+
+fn unknown_op(server: &mut Server, packet: &mut PacketInfo) {
+  println!("Unknown opcode {} from {}", packet.opcode, packet.src_addr);
+}
+
+fn create_game(server: &mut Server, packet: &mut PacketInfo) {
+  let (mut request, mut response) = packet.packets();
+
+  let name_len = request.pull::<u8>() as usize;
+
+  if name_len > MAX_GAME_NAME_SIZE {
+    let msg = format!("Game name too long! Must be <= {} characters.", MAX_GAME_NAME_SIZE);
+    error_response(server, packet, msg.as_str());
+    return;
+  }
+
+  let name_pos = request.pos;
+  let name = unsafe {
+    match str::from_utf8(request.peek_slice(name_len)) {
+      Ok(s) => s,
+      Err(_) => {
+        error_response(server, packet, "Invalid game name");
+        return;
+      }
+    }
+  };
+
+  let mut index: isize = -1;
+  for i in 0..MAX_GAMES {
+    match server.games[i] {
+      Some(game) => {
+        println!("CHECKING IF \"{}\" == \"{}\"", game.name, name);
+        if game.name == name {
+          let msg = format!("Game name {} already taken", name);
+          error_response(server, packet, msg.as_str());
+          return;
+        }
+      }
+
+      None => {
+        index = i as isize;
+        break;
+      }
+    }
+  }
+
+  if index < 0 {
+    error_response(server, packet, "Server is too full to accept another game");
+    return;
+  }
+  let index = index as usize;
+
+  unsafe {
+    ptr::copy_nonoverlapping(&request.buf[name_pos], &mut server.game_names[index][0], name_len);
+    server.games[index] = Some(
+      Game::new(
+        index as u8,
+        // here we trust that game_names[index] will not change
+        transmute::<_, &'static str>(&server.game_names[index][0..name_len])
+      )
+    );
+  }
+  let player = server.games[index].unwrap().players[0].unwrap();
+
+  response.push(&packet.packet_id);
+  response.push(&out_op::GAME_CREATED);
+  response.push(&player.id);
+  response.send_to(&server.socket, packet.src_addr);
+
+  println!("MADE GAME");
+
 }
 
 fn start_server(ip: &str) {
@@ -92,7 +193,16 @@ fn start_server(ip: &str) {
   let mut game_names = [[0u8; MAX_GAME_NAME_SIZE]; MAX_GAMES];
   let mut games: [Option<Game>; MAX_GAMES] = [None; MAX_GAMES];
 
-  let mut next_player_id: i16 = 1;
+  let mut server = Server {
+    socket: &socket,
+
+    game_names: &mut game_names,
+    games: &mut games
+  };
+
+  let create_game = create_game;
+  let mut operations = [None; 255];
+  operations[in_op::NEW_GAME as usize] = Some(&create_game);
 
   'receiving: loop {
     match socket.recv_from(&mut in_buf) {
@@ -109,96 +219,30 @@ fn start_server(ip: &str) {
         }
 
         // ==================== OTHER OPERATIONS ==============
-        let mut packet = Packet { buf: &mut in_buf, pos: 0 };
-        let mut response = Packet { buf: &mut out_buf, pos: 0 };
-
-        // let packet_id = pull!(packet => u16);
-
-        if response.buf.len() < 3 {
+        if len < 3 {
           println!("Packet too short to be anything!");
           continue 'receiving;
         }
 
+        let mut packet   = Packet { buf: &mut in_buf,  pos: 0 };
+        let mut response = Packet { buf: &mut out_buf, pos: 0 };
+
         let packet_id: u16 = packet.pull();
-        let opcode = packet.pull::<u8>();
+        let opcode:    u8  = packet.pull();
 
-        println!("********* processing packet id {} opcode {}", packet_id, opcode);
-        match opcode {
-          in_op::NEW_GAME => {
-            // let name_len = pull!(packet => u8) as usize;
-            let name_len = packet.pull::<u8>() as usize;
-
-            if name_len > MAX_GAME_NAME_SIZE {
-              let msg = format!("Game name too long! Must be < {} characters.", MAX_GAME_NAME_SIZE);
-              error_response(&socket, src_addr, msg.as_str(), packet_id, &mut response);
-              continue 'receiving;
-            }
-
-            let name_pos = packet.pos;
-            let name = unsafe {
-              match str::from_utf8(packet.peek_slice(name_len)) {
-                Ok(s) => s,
-                Err(_) => {
-                  error_response(&socket, src_addr, "Invalid game name", packet_id, &mut response);
-                  continue 'receiving;
-                }
-              }
-            };
-
-            let mut index: isize = -1;
-            for i in 0..MAX_GAMES {
-              match games[i] {
-                Some(game) => {
-                  println!("CHECKING IF \"{}\" == \"{}\"", game.name, name);
-                  if game.name == name {
-                    let msg = format!("Game name {} already taken", name);
-                    error_response(&socket, src_addr, msg.as_str(), packet_id, &mut response);
-                    continue 'receiving;
-                  }
-                }
-
-                None => {
-                  index = i as isize;
-                  break;
-                }
-              }
-            }
-
-            if index < 0 {
-              error_response(
-                  &socket, src_addr,
-                  "Server is too full to accept another game",
-                  packet_id, &mut response
-              );
-              continue 'receiving;
-            }
-            let index = index as usize;
-
-            unsafe {
-              ptr::copy_nonoverlapping(&packet.buf[name_pos], &mut game_names[index][0], name_len);
-              games[index] = Some(
-                Game::new(
-                  index as u8,
-                  // here we trust that game_names[index] will not change
-                  transmute::<_, &'static str>(&game_names[index][0..name_len]),
-                  next_player_id
-                )
-              );
-            }
-
-            response.push(&packet_id);
-            response.push(&out_op::GAME_CREATED);
-            response.push(&next_player_id);
-            next_player_id += 1;
-            response.send_to(&socket, src_addr);
-
-            println!("MADE GAME");
-          }
-
-          _ => {
-            // TODO send back an UNKNOWN_OP op
-            println!("Unknown opcode {} in a {}-byte packet from {} with packet id {}",
-                     opcode, len, src_addr, packet_id);
+        println!("\n********* processing packet id {} opcode {}", packet_id, opcode);
+        {
+          let mut packet_info = PacketInfo {
+            src_addr: src_addr,
+            packet_id: packet_id,
+            opcode: opcode,
+            len: len,
+            request: &mut packet,
+            response: &mut response
+          };
+          match operations[opcode as usize] {
+            Some(function) => function(&mut server, &mut packet_info),
+            None           => unknown_op(&mut server, &mut packet_info)
           }
         }
       }

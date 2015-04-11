@@ -32,6 +32,13 @@ impl<'b> Packet<'b> {
     self.pos += size_of::<T>();
   }
 
+  pub fn push_slice(&mut self, data: &[u8]) {
+    unsafe {
+      ptr::copy_nonoverlapping(&data[0], transmute(&mut self.buf[self.pos]), data.len());
+    }
+    self.pos += data.len();
+  }
+
   pub fn pull<T>(&mut self) -> T {
     unsafe {
       let mut value: T = uninitialized();
