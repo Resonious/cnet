@@ -64,8 +64,8 @@ macro_rules! create_game(
     let mut packet = [0u8; 256];
     match $socket.recv_from(&mut packet) {
       Ok((len, src_addr)) => {
-        let logic = |$packet: &[u8], $len: usize, $src_addr: SocketAddr| $logic;
-        logic(&packet, len, src_addr);
+        let logic = |$packet: &mut[u8], $len: usize, $src_addr: SocketAddr| $logic;
+        logic(&mut packet, len, src_addr);
       }
 
       Err(e) => panic!("Got error {} when trying to create game!", e)
@@ -101,12 +101,14 @@ fn server_cannot_create_2_games_with_the_same_name() {
 fn server_gets_a_player_id_or_something_on_game_create() {
   server_test!((socket, host_addr) {
     create_game!(socket, host_addr, b"THE GAME", 12 => (buf, len, _src_addr) {
-      let mut packet = unsafe { Packet { buf: transmute(buf), pos: 0 } };
+      let mut packet = Packet::new(buf);
       let packet_id: u16 = packet.pull();
       assert_eq!(packet_id, 12);
       assert_eq!(packet.pull::<u8>(), out_op::GAME_CREATED);
 
-      // TODO look for player id
+      assert!(packet.has::<i16>(len), "Packet does not have an i16 player ID after opcode");
+      let player_id: i16 = packet.pull();
+      println!("Got a player ID of {}!", player_id);
     });
   });
 }

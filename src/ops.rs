@@ -17,6 +17,10 @@ pub struct Packet<'b> {
 }
 
 impl<'b> Packet<'b> {
+  pub fn new(buf: &mut [u8]) -> Packet {
+    Packet { buf: buf, pos: 0 }
+  }
+
   pub fn ptr(&self) -> &u8 {
     &self.buf[self.pos]
   }
@@ -53,6 +57,10 @@ impl<'b> Packet<'b> {
     let pos = self.pos;
     self.pos += bytes;
     transmute(&self.buf[pos..pos+bytes])
+  }
+
+  pub fn has<T>(&self, size: usize) -> bool {
+    size - self.pos >= size_of::<T>()
   }
 
   pub fn send_to(&self, socket: &UdpSocket, addr: SocketAddr) {

@@ -1,5 +1,7 @@
 #![feature(ip_addr, std_misc, convert)]
 
+extern crate time;
+
 use std::net::UdpSocket;
 use std::net::{SocketAddr, IpAddr, Ipv4Addr};
 use std::str::FromStr;
@@ -9,6 +11,7 @@ use std::convert::AsRef;
 use std::thread;
 use std::ptr;
 use std::mem::{zeroed, transmute, size_of};
+use time::precise_time_ns;
 
 #[macro_use]
 pub mod ops;
@@ -26,6 +29,15 @@ struct Player {
   last_received_packet_at: u64, // In nanoseconds
 }
 
+impl Player {
+  fn new(id: i16) -> Player {
+    Player {
+      id: id,
+      last_received_packet_at: precise_time_ns()
+    }
+  }
+}
+
 #[derive(Clone, Copy)]
 struct Game {
   id: u8,
@@ -34,12 +46,14 @@ struct Game {
 }
 
 impl Game {
-  fn new(id: u8, name: &'static str) -> Game {
-    Game {
+  fn new(id: u8, name: &'static str, first_player_id: i16) -> Game {
+    let mut game = Game {
       id: id,
       name: name,
       players: unsafe { zeroed() }
-    }
+    };
+    game.players[0] = Player::new(first_player_id);
+    game
   }
 }
 
@@ -77,6 +91,8 @@ fn start_server(ip: &str) {
 
   let mut game_names = [[0u8; MAX_GAME_NAME_SIZE]; MAX_GAMES];
   let mut games: [Option<Game>; MAX_GAMES] = [None; MAX_GAMES];
+
+  let mut next_player_id: i16 = 1;
 
   'receiving: loop {
     match socket.recv_from(&mut in_buf) {
@@ -163,13 +179,17 @@ fn start_server(ip: &str) {
               games[index] = Some(
                 Game::new(
                   index as u8,
-                  transmute::<_, &'static str>(&game_names[index][0..name_len]))
+                  // here we trust that game_names[index] will not change
+                  transmute::<_, &'static str>(&game_names[index][0..name_len]),
+                  next_player_id
+                )
               );
             }
 
             response.push(&packet_id);
             response.push(&out_op::GAME_CREATED);
-            // TODO send a player ID and whatever player info they need
+            response.push(&next_player_id);
+            next_player_id += 1;
             response.send_to(&socket, src_addr);
 
             println!("MADE GAME");
