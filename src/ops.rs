@@ -34,7 +34,7 @@ impl<'b> Packet<'b> {
 
   pub fn push_slice(&mut self, data: &[u8]) {
     unsafe {
-      ptr::copy_nonoverlapping(&data[0], transmute(&mut self.buf[self.pos]), data.len());
+      ptr::copy_nonoverlapping(&data[0], &mut self.buf[self.pos], data.len());
     }
     self.pos += data.len();
   }

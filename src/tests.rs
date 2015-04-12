@@ -90,24 +90,24 @@ fn server_cannot_create_2_games_with_the_same_name() {
     });
 
     create_game!(socket, host_addr, b"Stupid game" => (packet, len, _src_addr) {
-      assert_eq!(packet[0], 0);
-      assert_eq!(packet[1], 0);
-      assert!(packet[2] == out_op::ERROR,
-              "Returned opcode was not ERROR, rather {}", packet[2]);
+      let mut response = Packet::new(packet);
+      let packet_id = response.pull::<u16>();
+      assert_eq!(packet_id, 0);
+      let opcode = response.pull::<u8>();
+      assert!(opcode == out_op::ERROR,
+              "Returned opcode was not ERROR, rather {}", opcode);
 
       assert!(len > 3, "No error message returned. packet length: {}", len);
 
-      // TODO figure out why the following won't pass
-      // let mut response = Packet::new(packet);
-      // let msg_len = response.pull::<u16>() as usize;
-      // assert!(msg_len > 1);
-      // let msg = unsafe {
-      //   match str::from_utf8(response.peek_slice(msg_len)) {
-      //     Ok(s) => s,
-      //     Err(_) => panic!("Error message was not correct utf8 format")
-      //   }
-      // };
-      // println!("Error message: {}", msg);
+      let msg_len = response.pull::<u16>() as usize;
+      assert!(msg_len > 1, "Message should have a length greater than 1; got {}", msg_len);
+      let msg = unsafe {
+        match str::from_utf8(response.peek_slice(msg_len)) {
+          Ok(s) => s,
+          Err(_) => panic!("Error message was not correct utf8 format")
+        }
+      };
+      println!("Error message: {}", msg);
     });
   });
 }

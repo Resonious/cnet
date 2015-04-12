@@ -79,7 +79,9 @@ struct PacketInfo<'a, 'b> {
 
 impl<'a, 'b> PacketInfo<'a, 'b> {
   pub fn packets(&mut self) -> (&'static mut Packet<'static>, &'static mut Packet<'static>) {
-    // HACK holy hell
+    // HACK
+    // This is just so I can get references to the Packets that don't "borrow" the PacketInfo.
+    // So no funny business, just convenience...
     unsafe {
       let mut request = transmute::<_, *mut usize>(&self.request);
       let mut response = transmute::<_, *mut usize>(&self.response);
@@ -100,7 +102,6 @@ fn error_response(server: &Server, packet: &mut PacketInfo, message: &str) {
     buf.push_slice(message_buf);
 
     buf.send_to(server.socket, packet.src_addr);
-    // socket.send_to(&buf[0..buf_len], addr).unwrap();
   }
 }
 
@@ -136,7 +137,7 @@ fn create_game(server: &mut Server, packet: &mut PacketInfo) {
       Some(game) => {
         println!("CHECKING IF \"{}\" == \"{}\"", game.name, name);
         if game.name == name {
-          let msg = format!("Game name {} already taken", name);
+          let msg = format!("Game name \"{}\" already taken", name);
           error_response(server, packet, msg.as_str());
           return;
         }
