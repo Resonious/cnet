@@ -5,10 +5,12 @@ use std::net::{SocketAddr};
 
 pub mod in_op {
   pub const NEW_GAME: u8 = 2;
+  pub const JOIN_GAME: u8 = 3;
 }
 pub mod out_op {
   pub const ERROR: u8 = 0;
   pub const GAME_CREATED: u8 = 2;
+  pub const GAME_JOINED: u8 = 3;
 }
 
 pub struct Packet<'b> {

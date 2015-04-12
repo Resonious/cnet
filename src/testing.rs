@@ -62,7 +62,7 @@ macro_rules! server_test(
   });
 
   (($socket:ident, $host_addr:ident) $test:expr) => (
-    server_test!((timeout: Duration::seconds(10))
+    server_test!((timeout: Duration::seconds(2))
                  ($socket, $host_addr) $test);
   );
 );
