@@ -182,6 +182,8 @@ fn player_can_join_game() {
       assert_packet_id!(packet_id, 14);
       assert_eq!(packet.pull::<u8>(), out_op::GAME_JOINED);
 
+      let player_id: u16 = packet.pull();
+      println!("Joined a game and got player id {}!", player_id);
       // TODO expect a player list or something?
     });
   });

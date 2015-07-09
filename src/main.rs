@@ -30,7 +30,7 @@ struct Player {
 }
 
 impl Player {
-  fn new(game_id: u8, id: u8) -> Player {
+  pub fn new(game_id: u8, id: u8) -> Player {
     let id_parts = [game_id, id];
     Player {
       id: unsafe { *transmute::<_, &u16>(&id_parts[0]) },
@@ -39,22 +39,41 @@ impl Player {
   }
 }
 
+const MAX_PLAYERS: usize = 10;
+
 #[derive(Clone, Copy)]
 struct Game {
   id: u8,
   name: &'static str,
-  players: [Option<Player>; 10]
+  players: [Option<Player>; MAX_PLAYERS]
 }
 
 impl Game {
-  fn new(id: u8, name: &'static str) -> Game {
+  pub fn new(id: u8, name: &'static str) -> Game {
     let mut game = Game {
       id: id,
       name: name,
-      players: [None; 10]
+      players: [None; MAX_PLAYERS]
     };
     game.players[0] = Some(Player::new(id, 0));
     game
+  }
+
+  pub fn add_player(&mut self) -> Option<*mut Player> {
+    let mut index: isize = -1;
+    for i in 0..MAX_PLAYERS {
+      match self.players[i] {
+        // TODO look into ref here
+        Some(_) => continue,
+        None => { index = i as isize; break; }
+      }
+    }
+    if index < 0 {
+      return None;
+    }
+    let index = index as usize;
+    self.players[index] = Some(Player::new(self.id, index as u8));
+    Some(&mut self.players[index].unwrap())
   }
 }
 
@@ -125,7 +144,7 @@ fn create_game(server: &mut Server, packet: &mut PacketInfo) {
     match str::from_utf8(request.peek_slice(name_len)) {
       Ok(s) => s,
       Err(_) => {
-        error_response(server, packet, "Invalid game name");
+        error_response(server, packet, "Requested game name was not vaild utf8");
         return;
       }
     }
@@ -134,6 +153,7 @@ fn create_game(server: &mut Server, packet: &mut PacketInfo) {
   let mut index: isize = -1;
   for i in 0..MAX_GAMES {
     match server.games[i] {
+      // TODO look into ref here
       Some(game) => {
         println!("CHECKING IF \"{}\" == \"{}\"", game.name, name);
         if game.name == name {
@@ -166,7 +186,7 @@ fn create_game(server: &mut Server, packet: &mut PacketInfo) {
       )
     );
   }
-  let player = server.games[index].unwrap().players[0].unwrap();
+  let player = &server.games[index].unwrap().players[0].unwrap();
 
   response.push(&packet.packet_id);
   response.push(&out_op::GAME_CREATED);
@@ -175,6 +195,65 @@ fn create_game(server: &mut Server, packet: &mut PacketInfo) {
 
   println!("MADE GAME");
 
+}
+
+fn join_game(server: &mut Server, packet: &mut PacketInfo) {
+  let (mut request, mut response) = packet.packets();
+
+  let name_len = request.pull::<u8>() as usize;
+
+  if name_len > MAX_GAME_NAME_SIZE {
+    let msg = format!("Game name too long! Must be <= {} characters.", MAX_GAME_NAME_SIZE);
+    error_response(server, packet, msg.as_str());
+    return;
+  }
+
+  let name = unsafe {
+    match str::from_utf8(request.peek_slice(name_len)) {
+      Ok(s) => s,
+      Err(_) => {
+        error_response(server, packet, "Requested game name was not vaild utf8");
+        return;
+      }
+    }
+  };
+
+  let mut index: isize = -1;
+  for i in 0..MAX_GAMES {
+    match server.games[i] {
+      // TODO look into ref here
+      Some(game) => {
+        if game.name == name {
+          index = i as isize;
+          break;
+        }
+      }
+
+      None => continue
+    }
+  }
+
+  if index < 0 {
+    error_response(server, packet, "No game with a name of \"{}\" was found!");
+    return;
+  }
+  let mut game = &mut server.games[index as usize].unwrap();
+
+  let player = match game.add_player() {
+    Some(player_ref) => player_ref,
+    None => {
+      let msg = format!("Game \"{}\" is full, sorry!", name);
+      error_response(server, packet, msg.as_str());
+      return;
+    }
+  };
+
+  response.push(&packet.packet_id);
+  response.push(&out_op::GAME_JOINED);
+  unsafe { response.push(&(*player).id); };
+  response.send_to(&server.socket, packet.src_addr);
+
+  println!("SOME POOR FOOL JOINED A GAME");
 }
 
 fn start_server(ip: &str) {
@@ -201,9 +280,15 @@ fn start_server(ip: &str) {
     games: &mut games
   };
 
-  let create_game = create_game;
-  let mut operations = [None; 255];
+  // let create_game = create_game;
+  // let join_game = join_game;
+  let fuck_you = |serv: &mut Server, pack: &mut PacketInfo| {
+    println!("FUCK!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! {}", serv.games.len());
+  };
+  let mut operations: [Option<fn(&mut Server, &mut PacketInfo)>; 255] = [None; 255];
+  operations[10] = Some(fuck_you);
   operations[in_op::NEW_GAME as usize] = Some(&create_game);
+  operations[in_op::JOIN_GAME as usize] = Some(&join_game);
 
   'receiving: loop {
     match socket.recv_from(&mut in_buf) {
